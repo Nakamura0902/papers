@@ -1,0 +1,209 @@
+// 手続きナビ付き 書類作成・PDF出力ツール
+// SQLite では JSON 型が無いため、JSON 系フィールドは String に JSON 文字列で保存する。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         String    @default("admin")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions          Session[]
+  generatedDocuments GeneratedDocument[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Employee {
+  id             String    @id @default(cuid())
+  name           String
+  nameKana       String?
+  birthDate      DateTime?
+  postalCode     String?
+  address        String?
+  phone          String?
+  email          String?
+  employmentType String? // 対象者区分 key（full_time_employee など）
+  department     String?
+  position       String?
+  startDate      DateTime?
+  endDate        DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime? // 論理削除
+
+  generatedDocuments GeneratedDocument[]
+}
+
+// 手続き目的マスタ
+model ProcedureType {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  candidateRules     DocumentCandidateRule[]
+  judgementQuestions DocumentJudgementQuestion[]
+  judgementRules     DocumentJudgementRule[]
+  generatedDocuments GeneratedDocument[]
+}
+
+// 対象者区分マスタ
+model WorkerType {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  description String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  candidateRules     DocumentCandidateRule[]
+  judgementQuestions DocumentJudgementQuestion[]
+  judgementRules     DocumentJudgementRule[]
+  generatedDocuments GeneratedDocument[]
+}
+
+// 書類マスタ
+model Document {
+  id                   String   @id @default(cuid())
+  key                  String   @unique
+  name                 String
+  category             String // retirement / onboarding など
+  description          String?
+  purpose              String? // 何を記すものか
+  defaultRequiredLevel String   @default("確認が必要")
+  whenRequired         String? // 必要になる条件
+  whenNotRequired      String? // 不要になる条件
+  submissionTo         String? // 提出先
+  storageLocation      String? // 社内保存先
+  requiresSignature    Boolean  @default(false)
+  requiresCompanySeal  Boolean  @default(false)
+  notes                String? // 注意事項
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  candidateRules     DocumentCandidateRule[]
+  judgementQuestions DocumentJudgementQuestion[]
+  judgementRules     DocumentJudgementRule[]
+  forms              DocumentForm[]
+  generatedDocuments GeneratedDocument[]
+}
+
+// 「手続き目的 × 対象者区分」で候補に出す書類
+model DocumentCandidateRule {
+  id                   String   @id @default(cuid())
+  procedureTypeId      String
+  workerTypeId         String
+  documentId           String
+  defaultRequiredLevel String   @default("確認が必要")
+  displayReason        String? // 候補に表示する理由
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  procedureType ProcedureType @relation(fields: [procedureTypeId], references: [id], onDelete: Cascade)
+  workerType    WorkerType    @relation(fields: [workerTypeId], references: [id], onDelete: Cascade)
+  document      Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([procedureTypeId, workerTypeId, documentId])
+}
+
+// 書類ごとの必要判定質問
+model DocumentJudgementQuestion {
+  id              String   @id @default(cuid())
+  documentId      String
+  procedureTypeId String
+  workerTypeId    String
+  key             String
+  questionText    String
+  inputType       String   @default("radio") // radio / select / checkbox / text
+  optionsJson     String? // JSON 配列の文字列
+  helpText        String?
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  document      Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  procedureType ProcedureType @relation(fields: [procedureTypeId], references: [id], onDelete: Cascade)
+  workerType    WorkerType    @relation(fields: [workerTypeId], references: [id], onDelete: Cascade)
+}
+
+// 回答に応じて必要度を判定するルール
+model DocumentJudgementRule {
+  id                   String   @id @default(cuid())
+  documentId           String
+  procedureTypeId      String
+  workerTypeId         String
+  conditionJson        String // {"questionKey":"...","equals":"..."}
+  resultRequiredLevel  String
+  resultMessage        String?
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  document      Document      @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  procedureType ProcedureType @relation(fields: [procedureTypeId], references: [id], onDelete: Cascade)
+  workerType    WorkerType    @relation(fields: [workerTypeId], references: [id], onDelete: Cascade)
+}
+
+// PDF作成用の入力フォーム定義
+model DocumentForm {
+  id         String   @id @default(cuid())
+  documentId String
+  schemaJson String // フォーム定義 JSON
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+// 作成済み書類
+model GeneratedDocument {
+  id              String    @id @default(cuid())
+  documentId      String
+  procedureTypeId String?
+  workerTypeId    String?
+  employeeId      String?
+  title           String
+  formDataJson    String // 入力内容 JSON
+  pdfFilePath     String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  printedAt       DateTime?
+  deletedAt       DateTime? // 論理削除
+
+  document      Document       @relation(fields: [documentId], references: [id])
+  procedureType ProcedureType? @relation(fields: [procedureTypeId], references: [id])
+  workerType    WorkerType?    @relation(fields: [workerTypeId], references: [id])
+  employee      Employee?      @relation(fields: [employeeId], references: [id])
+  createdBy     User?          @relation(fields: [createdById], references: [id])
+}
