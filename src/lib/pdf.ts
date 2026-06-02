@@ -1,7 +1,7 @@
 import "server-only";
 import path from "path";
 import { promises as fs } from "fs";
-import puppeteer from "puppeteer";
+import { getSupabaseAdmin, PDF_BUCKET } from "./supabase";
 
 const PDF_DIR = path.join(process.cwd(), "storage", "pdfs");
 
@@ -56,12 +56,29 @@ ${bodyHtml}
 </html>`;
 }
 
-// HTML 文字列から PDF Buffer を生成
-export async function htmlToPdf(html: string): Promise<Buffer> {
-  const browser = await puppeteer.launch({
+// ブラウザ起動：Vercel等のサーバーレスでは @sparticuz/chromium、
+// ローカルでは通常の puppeteer を使う。
+async function launchBrowser() {
+  const onServerless = !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+  if (onServerless) {
+    const chromium = (await import("@sparticuz/chromium")).default;
+    const puppeteer = (await import("puppeteer-core")).default;
+    return puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: true,
+    });
+  }
+  const puppeteer = (await import("puppeteer")).default;
+  return puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
+}
+
+// HTML 文字列から PDF Buffer を生成
+export async function htmlToPdf(html: string): Promise<Buffer> {
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "load" });
@@ -87,14 +104,33 @@ export function buildPdfFileName(
   return `${safe(employeeName) || "無記名"}_${safe(documentName)}_${d}.pdf`;
 }
 
-// PDF を storage/pdfs に保存し、保存パスを返す
+// PDF を保存し、保存パス（識別子）を返す。
+// Supabase 設定があれば Storage、なければローカル storage/pdfs に保存（開発用）。
+// 戻り値の先頭が "supabase:" の場合は Storage 上のキーを表す。
 export async function savePdf(fileName: string, buffer: Buffer): Promise<string> {
+  const sb = getSupabaseAdmin();
+  if (sb) {
+    const key = `${Date.now()}_${fileName}`;
+    const { error } = await sb.storage
+      .from(PDF_BUCKET)
+      .upload(key, buffer, { contentType: "application/pdf", upsert: true });
+    if (error) throw new Error(`Supabase Storage upload failed: ${error.message}`);
+    return `supabase:${key}`;
+  }
   await fs.mkdir(PDF_DIR, { recursive: true });
   const filePath = path.join(PDF_DIR, fileName);
   await fs.writeFile(filePath, buffer);
   return filePath;
 }
 
-export async function readPdf(filePath: string): Promise<Buffer> {
-  return fs.readFile(filePath);
+export async function readPdf(filePathOrKey: string): Promise<Buffer> {
+  if (filePathOrKey.startsWith("supabase:")) {
+    const sb = getSupabaseAdmin();
+    if (!sb) throw new Error("Supabase 設定がありません");
+    const key = filePathOrKey.slice("supabase:".length);
+    const { data, error } = await sb.storage.from(PDF_BUCKET).download(key);
+    if (error || !data) throw new Error(`Supabase Storage download failed: ${error?.message}`);
+    return Buffer.from(await data.arrayBuffer());
+  }
+  return fs.readFile(filePathOrKey);
 }

@@ -4,6 +4,10 @@ import { withAuth } from "@/lib/api";
 import { renderDocumentHtml } from "@/lib/render";
 import { htmlToPdf, savePdf, buildPdfFileName } from "@/lib/pdf";
 
+// PDF生成はヘッドレスChromiumを使うため Node ランタイム＋長めの実行時間が必要
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 // 入力: documentKey, procedureKey, workerTypeKey, employeeId, formData
 // 処理: 入力保存 → PDF生成 → 履歴保存 → パス返却
 export async function POST(req: NextRequest) {

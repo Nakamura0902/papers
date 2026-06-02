@@ -26,33 +26,30 @@
 npm install
 ```
 
-> Puppeteer は初回インストール時に Chromium（約150MB）をダウンロードします。
-> ネットワーク状況により時間がかかる、または失敗する場合があります。失敗した場合は
-> `npx puppeteer browsers install chrome` を再実行してください。
+> ローカルの PDF 生成には `puppeteer`（開発依存）を使い、初回に Chromium をダウンロードします。
+> 失敗した場合は `npx puppeteer browsers install chrome` を再実行してください。
+> 本番（Vercel など）では `puppeteer-core` + `@sparticuz/chromium` に自動で切り替わります。
 
 ## 環境変数（.env）
 
-```
-DATABASE_URL="file:./dev.db"
-SESSION_SECRET="（本番では長いランダム文字列に変更）"
-# 任意: PDF に印字する会社情報
-# COMPANY_NAME="株式会社サンプル"
-# COMPANY_ADDRESS="東京都千代田区サンプル1-2-3"
-# COMPANY_PHONE="03-0000-0000"
-# COMPANY_REP="代表取締役 山田 花子"
-```
+`.env.example` をコピーして `.env` を作成し、Supabase の値を入れてください。
 
-## データベース（Prisma）
+- `DATABASE_URL` … Supabase トランザクションプーラー（ポート6543）
+- `DIRECT_URL` … Supabase セッションプーラー（ポート5432・マイグレーション用）
+- `SESSION_SECRET` … 長いランダム文字列
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` … PDF を Supabase Storage に保存するため
+- `COMPANY_*` … PDF に印字する会社情報（任意）
+
+> ローカル開発で `SUPABASE_URL` を設定しない場合、PDF はローカルの `storage/pdfs/` に保存されます（フォールバック）。
+
+## データベース（Prisma + Supabase Postgres）
 
 ```bash
-# マイグレーション適用（初回は dev.db を作成）
-npx prisma migrate dev
+# 初回：スキーマを本番DBへ適用（DIRECT_URL を使用）
+npx prisma migrate deploy
 
 # シード投入（マスタ・候補ルール・判定ルール・フォーム・管理者ユーザー）
 npx prisma db seed
-
-# まとめてリセットしたい場合
-npx prisma migrate reset --force
 ```
 
 ## 開発サーバー
@@ -85,8 +82,22 @@ npm run dev
 - PDF は Puppeteer（Chromium）で HTML から生成します。サーバー側でのみ実行されます。
 - 日本語フォントは OS 標準フォント（Yu Gothic / Meiryo 等）を使用します。
   環境にこれらが無い場合、表示が崩れることがあります。
-- 生成した PDF は `storage/pdfs/` に `氏名_書類名_作成日.pdf` 形式で保存され、
+- 生成した PDF は `氏名_書類名_作成日.pdf` 形式で **Supabase Storage（バケット `pdfs`）** に保存されます
+  （`SUPABASE_URL` 未設定時はローカル `storage/pdfs/`）。
   ファイルへのアクセスは認証必須の API（`/api/generated-documents/[id]/pdf`）経由のみです。
+
+## Vercel + Supabase へのデプロイ
+
+1. **Supabase**：プロジェクト作成 → Settings → Database で DB パスワードを設定 → 「Connect → ORMs → Prisma」で
+   `DATABASE_URL`（6543）と `DIRECT_URL`（5432）を取得。Storage に private バケット **`pdfs`** を作成。
+2. **Vercel**：本リポジトリを Import し、環境変数を登録：
+   - `DATABASE_URL` / `DIRECT_URL` / `SESSION_SECRET`
+   - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`
+   - `PUPPETEER_SKIP_DOWNLOAD=true`（ビルド時の不要な Chromium DL を防止）
+   - 任意：`COMPANY_*`
+3. **Deploy**：ビルド時に `prisma migrate deploy` でテーブルが作成されます。
+4. **初期データ投入（初回のみ）**：手元で本番の `DATABASE_URL`/`DIRECT_URL` を `.env` に入れて
+   `npx prisma db seed` を実行 → `admin@example.com / password123` でログイン（**本番ではパスワード変更推奨**）。
 
 ## セキュリティ
 
@@ -99,8 +110,8 @@ npm run dev
 ## 実装済みの主な書類・ルール
 
 - 書類マスタ: 退職関連 9 種、入社関連 10 種
-- 候補・判定ルール: **退職 × アルバイト・パート** の 9 書類
-  （確認質問・回答別判定を実装）
+- 候補・判定ルール: **退職・入社 × 6 対象者区分（全12組み合わせ）** を実装
+  （区分ごとの必要度・確認質問・回答別判定）
 - 専用 PDF テンプレート: 退職関連 9 種（行政系は社内確認用の簡易様式）
 - 入力フォーム: 退職届 / 退職合意書 / 貸与物返却確認書 / 最終給与確認書 /
   有給休暇残日数確認書（詳細）、その他は簡易確認フォーム

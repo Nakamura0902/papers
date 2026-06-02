@@ -4,6 +4,10 @@ import { withAuth } from "@/lib/api";
 import { renderDocumentHtml } from "@/lib/render";
 import { htmlToPdf, savePdf, buildPdfFileName } from "@/lib/pdf";
 
+// 再編集時に PDF を再生成するため Node ランタイム＋長めの実行時間が必要
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

@@ -30,7 +30,11 @@ export async function GET(
   }
 
   const download = req.nextUrl.searchParams.get("download") === "1";
-  const fileName = path.basename(item.pdfFilePath);
+  // 保存パス（ローカルパス or "supabase:<timestamp>_氏名_書類_日付.pdf"）から表示用ファイル名を作る
+  const raw = item.pdfFilePath.startsWith("supabase:")
+    ? item.pdfFilePath.slice("supabase:".length)
+    : path.basename(item.pdfFilePath);
+  const fileName = raw.replace(/^\d+_/, ""); // 先頭のタイムスタンプを除去
   const encoded = encodeURIComponent(fileName);
 
   return new NextResponse(new Uint8Array(buffer), {
