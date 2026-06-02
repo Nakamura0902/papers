@@ -95,9 +95,15 @@ npm run dev
    - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`
    - `PUPPETEER_SKIP_DOWNLOAD=true`（ビルド時の不要な Chromium DL を防止）
    - 任意：`COMPANY_*`
-3. **Deploy**：ビルド時に `prisma migrate deploy` でテーブルが作成されます。
-4. **初期データ投入（初回のみ）**：手元で本番の `DATABASE_URL`/`DIRECT_URL` を `.env` に入れて
-   `npx prisma db seed` を実行 → `admin@example.com / password123` でログイン（**本番ではパスワード変更推奨**）。
+3. **DBテーブル作成＋初期データ投入（初回のみ・手元PCから）**：本番の `DATABASE_URL`/`DIRECT_URL` を
+   手元の `.env` に入れて以下を実行（Vercelビルドはネットワーク制約でDB接続が固まりやすいため、
+   マイグレーションは手元から流す方式）：
+   ```bash
+   npx prisma migrate deploy   # テーブル作成
+   npx prisma db seed          # マスタ・候補ルール・管理者ユーザー投入
+   ```
+4. **Deploy**：環境変数を登録後に Vercel で Redeploy → `admin@example.com / password123` でログイン
+   （**本番ではパスワード変更推奨**）。
 
 ## セキュリティ
 
